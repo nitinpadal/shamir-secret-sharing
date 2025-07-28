@@ -1,82 +1,85 @@
+import java.io.*;
 import java.math.BigInteger;
-import java.security.SecureRandom;
+import java.nio.file.*;
 import java.util.*;
+import org.json.*;  // Add org.json dependency or manually parse JSON if not using Maven
 
-public class ShamirSecretSharing {
+public class SecretSolver {
 
-    private static final SecureRandom random = new SecureRandom();
-    private static final BigInteger PRIME = new BigInteger("208351617316091241234326746312124448251235562226470491514186331217050270460481");
-
-    // Split the secret into shares
-    public static Map<Integer, BigInteger> splitSecret(BigInteger secret, int n, int k) {
-        BigInteger[] coeffs = new BigInteger[k];
-        coeffs[0] = secret;
-
-        // Generate random coefficients for polynomial
-        for (int i = 1; i < k; i++) {
-            coeffs[i] = new BigInteger(PRIME.bitLength() - 1, random);
+    public static class Point {
+        BigInteger x, y;
+        Point(BigInteger x, BigInteger y) {
+            this.x = x;
+            this.y = y;
         }
-
-        Map<Integer, BigInteger> shares = new HashMap<>();
-
-        for (int x = 1; x <= n; x++) {
-            BigInteger y = BigInteger.ZERO;
-            for (int i = 0; i < k; i++) {
-                y = y.add(coeffs[i].multiply(BigInteger.valueOf(x).pow(i))).mod(PRIME);
-            }
-            shares.put(x, y);
-        }
-
-        return shares;
     }
 
-    // Reconstruct the secret using k shares
-    public static BigInteger reconstructSecret(Map<Integer, BigInteger> shares) {
-        BigInteger secret = BigInteger.ZERO;
+    // Lagrange interpolation at x = 0
+    public static BigInteger lagrangeInterpolation(List<Point> points, BigInteger prime) {
+        BigInteger result = BigInteger.ZERO;
 
-        for (Map.Entry<Integer, BigInteger> entry1 : shares.entrySet()) {
-            int x1 = entry1.getKey();
-            BigInteger y1 = entry1.getValue();
+        for (int i = 0; i < points.size(); i++) {
+            BigInteger xi = points.get(i).x;
+            BigInteger yi = points.get(i).y;
 
             BigInteger numerator = BigInteger.ONE;
             BigInteger denominator = BigInteger.ONE;
 
-            for (Map.Entry<Integer, BigInteger> entry2 : shares.entrySet()) {
-                int x2 = entry2.getKey();
-                if (x1 != x2) {
-                    numerator = numerator.multiply(BigInteger.valueOf(-x2)).mod(PRIME);
-                    denominator = denominator.multiply(BigInteger.valueOf(x1 - x2)).mod(PRIME);
+            for (int j = 0; j < points.size(); j++) {
+                if (i != j) {
+                    BigInteger xj = points.get(j).x;
+                    numerator = numerator.multiply(xj.negate()).mod(prime);
+                    denominator = denominator.multiply(xi.subtract(xj)).mod(prime);
                 }
             }
 
-            BigInteger lagrange = numerator.multiply(denominator.modInverse(PRIME)).mod(PRIME);
-            secret = secret.add(y1.multiply(lagrange)).mod(PRIME);
+            BigInteger term = yi.multiply(numerator).multiply(denominator.modInverse(prime)).mod(prime);
+            result = result.add(term).mod(prime);
         }
 
-        return secret;
+        return result;
     }
 
-    public static void main(String[] args) {
-        int n = 5;  // total shares
-        int k = 3;  // threshold
-        BigInteger secret = new BigInteger("123456789");
+    public static List<Point> parseJsonFile(String filePath, List<Integer> selectedKeys) throws Exception {
+        String content = new String(Files.readAllBytes(Paths.get(filePath)));
+        JSONObject json = new JSONObject(content);
 
-        System.out.println("Original Secret: " + secret);
+        JSONObject keysObj = json.getJSONObject("keys");
+        int k = keysObj.getInt("k");
 
-        // Split secret
-        Map<Integer, BigInteger> shares = splitSecret(secret, n, k);
-        System.out.println("\nGenerated Shares:");
-        for (Map.Entry<Integer, BigInteger> entry : shares.entrySet()) {
-            System.out.println("Share " + entry.getKey() + ": " + entry.getValue());
+        List<Point> points = new ArrayList<>();
+
+        for (Integer key : selectedKeys) {
+            if (!json.has(String.valueOf(key))) continue;
+
+            JSONObject pointObj = json.getJSONObject(String.valueOf(key));
+            int base = Integer.parseInt(pointObj.getString("base"));
+            String value = pointObj.getString("value");
+
+            BigInteger x = BigInteger.valueOf(key);
+            BigInteger y = new BigInteger(value, base);
+            points.add(new Point(x, y));
         }
 
-        // Pick k shares to reconstruct
-        Map<Integer, BigInteger> subset = new HashMap<>();
-        subset.put(1, shares.get(1));
-        subset.put(2, shares.get(2));
-        subset.put(4, shares.get(4));
+        return points;
+    }
 
-        BigInteger recovered = reconstructSecret(subset);
-        System.out.println("\nRecovered Secret using 3 shares: " + recovered);
+    public static void main(String[] args) throws Exception {
+        // Use a large prime number for modular arithmetic (larger than any expected value)
+        BigInteger prime = new BigInteger("340282366920938463463374607431768211507"); // A 128-bit prime
+
+        // First test case
+        List<Integer> selected1 = Arrays.asList(1, 2, 3); // Use any 3 of the 4 roots
+        List<Point> points1 = parseJsonFile("testcase1.json", selected1);
+        BigInteger secret1 = lagrangeInterpolation(points1, prime);
+
+        // Second test case
+        List<Integer> selected2 = Arrays.asList(1, 2, 3, 4, 5, 6, 7); // Any 7 of 10 roots
+        List<Point> points2 = parseJsonFile("testcase2.json", selected2);
+        BigInteger secret2 = lagrangeInterpolation(points2, prime);
+
+        // Output both secrets
+        System.out.println("Secret 1: " + secret1);
+        System.out.println("Secret 2: " + secret2);
     }
 }
